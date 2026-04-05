@@ -1,111 +1,131 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useData } from '@/lib/data/provider';
 import type { USProperty, MetroArea } from '@/lib/types/property';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Map, Building2, DollarSign, TrendingUp } from 'lucide-react';
+import type { MapBounds } from '@/lib/types/geo';
+import { MapSidebar } from '@/components/map/map-sidebar';
+import { TimeSlider } from '@/components/map/time-slider';
+import { quarters } from '@/lib/config/constants';
+import { Activity } from 'lucide-react';
+import { metroAreas } from '@/lib/data/metro-areas';
+
+// Dynamic import to avoid SSR issues with maplibre-gl
+const PropertyMap = dynamic(
+  () => import('@/components/map/property-map').then((m) => m.PropertyMap),
+  { ssr: false, loading: () => <MapSkeleton /> }
+);
+
+function MapSkeleton() {
+  return (
+    <div className="w-full h-full flex items-center justify-center bg-muted/20">
+      <div className="flex flex-col items-center gap-3 text-muted-foreground">
+        <Activity className="h-8 w-8 animate-pulse" />
+        <span className="text-sm">Loading map…</span>
+      </div>
+    </div>
+  );
+}
 
 export default function MapPage() {
   const { repository, activeMetro } = useData();
   const [properties, setProperties] = useState<USProperty[]>([]);
-  const [metro, setMetro] = useState<MetroArea | null>(null);
+  const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
+  const [activeMetric, setActiveMetric] = useState('pricePerSqft');
+  const [quarterIdx, setQuarterIdx] = useState(quarters.length - 1);
   const [loading, setLoading] = useState(true);
+
+  // Get metro config for center/zoom
+  const metro = useMemo<MetroArea>(
+    () => metroAreas.find((m) => m.id === activeMetro) ?? metroAreas[0],
+    [activeMetro]
+  );
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([
-      repository.getProperties({ metro: activeMetro }),
-      repository.getMetroAreas(),
-    ]).then(([props, metros]) => {
+    repository.getProperties({ metro: activeMetro }).then((props) => {
       setProperties(props);
-      setMetro(metros.find((m) => m.id === activeMetro) ?? null);
+      setVisibleIds(new Set()); // reset visible set on metro change
       setLoading(false);
     });
   }, [repository, activeMetro]);
 
+  const handleBoundsChange = useCallback((_bounds: MapBounds, ids: Set<string>) => {
+    setVisibleIds(ids);
+  }, []);
+
+  // Apply quarterly price adjustment (simulated via HPI multiplier)
+  const adjustedProperties = useMemo(() => {
+    if (!properties.length) return properties;
+    const quarter = quarters[quarterIdx];
+    // 2026-Q1 is the "current" period (index 24), adjust relative to that
+    const currentIdx = quarters.length - 1;
+    const ratio = (quarterIdx - currentIdx) * 0.012; // ~1.2% per quarter drift
+    const multiplier = 1 + ratio;
+    if (Math.abs(ratio) < 0.001) return properties;
+    return properties.map((p) => ({
+      ...p,
+      listPrice: Math.round(p.listPrice * multiplier),
+      pricePerSqft: Math.round(p.pricePerSqft * multiplier),
+    }));
+  }, [properties, quarterIdx]);
+
+  const visibleProperties = useMemo(
+    () =>
+      visibleIds.size > 0
+        ? adjustedProperties.filter((p) => visibleIds.has(p.id))
+        : adjustedProperties,
+    [adjustedProperties, visibleIds]
+  );
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="text-muted-foreground">Loading properties...</div>
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Activity className="h-8 w-8 animate-pulse" />
+          <span className="text-sm">Loading {metro.name} properties…</span>
+        </div>
       </div>
     );
   }
 
-  const avgPrice = properties.reduce((s, p) => s + p.listPrice, 0) / (properties.length || 1);
-  const avgPpsf = properties.reduce((s, p) => s + p.pricePerSqft, 0) / (properties.length || 1);
-  const avgDom = properties.reduce((s, p) => s + p.daysOnMarket, 0) / (properties.length || 1);
-
   return (
-    <div className="flex-1 flex flex-col">
-      {/* Map placeholder — Phase 3 will add Mapbox GL JS here */}
-      <div className="flex-1 bg-muted/30 flex items-center justify-center border-b min-h-[400px] relative">
-        <div className="text-center space-y-3">
-          <Map className="h-16 w-16 mx-auto text-muted-foreground/50" />
-          <div>
-            <h2 className="text-lg font-semibold">
-              {metro?.name}, {metro?.state} — Property Map
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Mapbox GL JS map with heatmap layers coming in Phase 3
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {properties.length.toLocaleString()} properties loaded
-            </p>
-          </div>
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Main split: map + sidebar */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Map (fills remaining space) */}
+        <div className="flex-1 relative">
+          <PropertyMap
+            properties={adjustedProperties}
+            activeMetric={activeMetric}
+            center={metro.center}
+            zoom={metro.zoom}
+            onBoundsChange={handleBoundsChange}
+          />
         </div>
-        <Badge variant="outline" className="absolute top-4 right-4">
-          Phase 3: Mapbox
-        </Badge>
+
+        {/* Sidebar */}
+        <div className="w-72 shrink-0 border-l bg-background overflow-hidden">
+          <MapSidebar
+            allProperties={adjustedProperties}
+            visibleProperties={visibleProperties}
+            activeMetric={activeMetric}
+            onMetricChange={setActiveMetric}
+          />
+        </div>
       </div>
 
-      {/* Summary stats panel */}
-      <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Building2 className="h-4 w-4" />
-              Properties
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{properties.length.toLocaleString()}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
-              Avg List Price
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">${(avgPrice / 1000).toFixed(0)}K</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" />
-              Avg $/sqft
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">${avgPpsf.toFixed(0)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Map className="h-4 w-4" />
-              Avg Days on Market
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{avgDom.toFixed(0)}</div>
-          </CardContent>
-        </Card>
+      {/* Time slider footer */}
+      <div className="border-t bg-background px-6 py-3">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-medium text-muted-foreground w-20 shrink-0">
+            Time Period
+          </span>
+          <div className="flex-1">
+            <TimeSlider value={quarterIdx} onChange={setQuarterIdx} />
+          </div>
+        </div>
       </div>
     </div>
   );
