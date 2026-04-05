@@ -9,8 +9,10 @@ import type { MapBounds } from '@/lib/types/geo';
 import { MapSidebar } from '@/components/map/map-sidebar';
 import { TimeSlider } from '@/components/map/time-slider';
 import { MapFilters, DEFAULT_FILTERS, type FilterState } from '@/components/map/map-filters';
+import { PropertySearch } from '@/components/map/property-search';
+import { SidebarSkeleton } from '@/components/map/sidebar-skeleton';
 import { quarters } from '@/lib/config/constants';
-import { Activity } from 'lucide-react';
+import { PanelRight, X, Activity } from 'lucide-react';
 import { metroAreas } from '@/lib/data/metro-areas';
 
 // Dynamic import — avoids SSR for maplibre-gl
@@ -50,6 +52,8 @@ export default function MapPage() {
   const [quarterIdx, setQuarterIdx] = useState(quarters.length - 1);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const metro = useMemo<MetroArea>(
@@ -97,13 +101,25 @@ export default function MapPage() {
     [timeAdjustedProperties, filters]
   );
 
+  // Apply address/city/zip search on top of filters
+  const searchFilteredProperties = useMemo(() => {
+    if (!searchQuery.trim()) return filteredProperties;
+    const q = searchQuery.toLowerCase();
+    return filteredProperties.filter(
+      (p) =>
+        p.address.toLowerCase().includes(q) ||
+        p.city.toLowerCase().includes(q) ||
+        p.zipCode.includes(q)
+    );
+  }, [filteredProperties, searchQuery]);
+
   // Properties visible in current map bounds
   const visibleProperties = useMemo(
     () =>
       visibleIds.size > 0
-        ? filteredProperties.filter((p) => visibleIds.has(p.id))
-        : filteredProperties,
-    [filteredProperties, visibleIds]
+        ? searchFilteredProperties.filter((p) => visibleIds.has(p.id))
+        : searchFilteredProperties,
+    [searchFilteredProperties, visibleIds]
   );
 
   // Score lookup map
@@ -118,10 +134,16 @@ export default function MapPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-muted-foreground">
-          <Activity className="h-8 w-8 animate-pulse" />
-          <span className="text-sm">Loading {metro.name} properties…</span>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="border-b bg-background px-4 py-2 flex items-center gap-3">
+          <div className="h-8 w-20 bg-muted animate-pulse rounded-md" />
+          <div className="h-4 w-36 bg-muted animate-pulse rounded" />
+        </div>
+        <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 bg-muted/20 animate-pulse" />
+          <div className="hidden md:block w-72 border-l">
+            <SidebarSkeleton />
+          </div>
         </div>
       </div>
     );
@@ -130,19 +152,29 @@ export default function MapPage() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="border-b bg-background px-4 py-2 flex items-center gap-3">
+      <div className="border-b bg-background px-4 py-2 flex items-center gap-3 overflow-x-auto">
         <MapFilters filters={filters} onChange={setFilters} />
-        <span className="text-xs text-muted-foreground">
-          {filteredProperties.length.toLocaleString()} of {allProperties.length.toLocaleString()} properties
+        <PropertySearch onSearch={setSearchQuery} />
+        <span className="text-xs text-muted-foreground shrink-0">
+          {searchFilteredProperties.length.toLocaleString()} of {allProperties.length.toLocaleString()} properties
         </span>
       </div>
 
+      {/* Mobile sidebar toggle */}
+      <button
+        className="fixed bottom-4 right-4 z-40 md:hidden flex items-center gap-1.5 bg-primary text-primary-foreground rounded-full px-4 py-2.5 shadow-lg text-xs font-medium"
+        onClick={() => setSidebarOpen((o) => !o)}
+      >
+        <PanelRight className="h-4 w-4" />
+        {sidebarOpen ? 'Close' : 'Stats'}
+      </button>
+
       {/* Map + sidebar split */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Map */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Map — full width on mobile, shrinks on desktop */}
         <div className="flex-1 relative min-w-0">
           <PropertyMap
-            properties={filteredProperties}
+            properties={searchFilteredProperties}
             activeMetric={activeMetric}
             center={metro.center}
             zoom={metro.zoom}
@@ -152,10 +184,10 @@ export default function MapPage() {
           />
         </div>
 
-        {/* Sidebar — swaps between stats/layers and property detail */}
-        <div className="w-72 shrink-0 border-l bg-background overflow-hidden flex flex-col">
+        {/* Desktop sidebar */}
+        <div className="hidden md:flex w-72 shrink-0 border-l bg-background overflow-hidden flex-col">
           <MapSidebar
-            allProperties={filteredProperties}
+            allProperties={searchFilteredProperties}
             visibleProperties={visibleProperties}
             activeMetric={activeMetric}
             onMetricChange={(m) => { setActiveMetric(m); setSelectedId(null); }}
@@ -164,6 +196,38 @@ export default function MapPage() {
             onClearSelection={() => setSelectedId(null)}
           />
         </div>
+
+        {/* Mobile sidebar overlay */}
+        {sidebarOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-30 bg-black/40 md:hidden"
+              onClick={() => setSidebarOpen(false)}
+            />
+            <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden bg-background rounded-t-2xl shadow-2xl max-h-[70vh] overflow-hidden flex flex-col">
+              <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+                <span className="text-sm font-semibold">Market Stats</span>
+                <button
+                  onClick={() => setSidebarOpen(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                <MapSidebar
+                  allProperties={searchFilteredProperties}
+                  visibleProperties={visibleProperties}
+                  activeMetric={activeMetric}
+                  onMetricChange={(m) => { setActiveMetric(m); setSelectedId(null); setSidebarOpen(false); }}
+                  selectedProperty={selectedProperty}
+                  selectedScore={selectedScore}
+                  onClearSelection={() => { setSelectedId(null); setSidebarOpen(false); }}
+                />
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Time slider footer */}

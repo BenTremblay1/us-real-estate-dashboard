@@ -22,9 +22,10 @@ const INDICATORS: { key: keyof EconomicData; label: string; format: (v: number) 
 
 interface Props {
   data: EconomicData[];
+  source?: 'fred' | 'mock';
 }
 
-export function EconomicIndicatorsPanel({ data }: Props) {
+export function EconomicIndicatorsPanel({ data, source }: Props) {
   const [activeIndicator, setActiveIndicator] = useState<keyof EconomicData>('mortgageRate30Y');
 
   const indicator = INDICATORS.find((i) => i.key === activeIndicator) ?? INDICATORS[0];
@@ -40,6 +41,14 @@ export function EconomicIndicatorsPanel({ data }: Props) {
 
   return (
     <div className="space-y-4">
+      {/* Live data badge */}
+      {source === 'fred' && (
+        <div className="flex items-center gap-1.5 text-[10px] font-medium text-green-600">
+          <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+          Live data from FRED
+        </div>
+      )}
+
       {/* Indicator selector */}
       <div className="flex flex-wrap gap-2">
         {INDICATORS.map((ind) => (

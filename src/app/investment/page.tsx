@@ -13,13 +13,14 @@ import type { EconomicData } from '@/lib/types/economic';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, TrendingUp, Shield, Target, Activity, FlaskConical, LineChart } from 'lucide-react';
+import { BarChart3, TrendingUp, Shield, Target, FlaskConical, LineChart, Activity } from 'lucide-react';
 import { PredictiveForecastChart } from '@/components/investment/predictive-forecast-chart';
 import { DealScoringTable } from '@/components/investment/deal-scoring-table';
 import { StressTestPanel } from '@/components/investment/stress-test-panel';
 import { EconomicIndicatorsPanel } from '@/components/investment/economic-indicators-panel';
 import { MarketCycleGauge } from '@/components/investment/market-cycle-gauge';
 import { CorrelationMatrix } from '@/components/investment/correlation-matrix';
+import { InvestmentSkeleton } from '@/components/investment/investment-skeleton';
 
 const PHASE_BADGE: Record<string, string> = {
   Recovery: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300',
@@ -37,6 +38,7 @@ export default function InvestmentPage() {
   const [forecast, setForecast] = useState<ForecastData[]>([]);
   const [correlations, setCorrelations] = useState<CorrelationData[]>([]);
   const [economicData, setEconomicData] = useState<EconomicData[]>([]);
+  const [fredSource, setFredSource] = useState<'fred' | 'mock'>('mock');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -58,17 +60,21 @@ export default function InvestmentPage() {
       setEconomicData(econ);
       setLoading(false);
     });
+
+    // Fetch live FRED data (falls back to mock automatically if no API key)
+    fetch('/api/economic/fred')
+      .then((r) => r.json())
+      .then((result: { source: 'fred' | 'mock'; data: EconomicData[] }) => {
+        if (result.data?.length) {
+          setEconomicData(result.data);
+          setFredSource(result.source);
+        }
+      })
+      .catch(() => { /* keep mock data */ });
   }, [repository, activeMetro]);
 
   if (loading || !summary || !cycle) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-muted-foreground">
-          <Activity className="h-8 w-8 animate-pulse" />
-          <span className="text-sm">Loading analytics…</span>
-        </div>
-      </div>
-    );
+    return <InvestmentSkeleton />;
   }
 
   return (
@@ -199,7 +205,7 @@ export default function InvestmentPage() {
                 </p>
               </CardHeader>
               <CardContent>
-                <EconomicIndicatorsPanel data={economicData} />
+                <EconomicIndicatorsPanel data={economicData} source={fredSource} />
               </CardContent>
             </Card>
           </div>
