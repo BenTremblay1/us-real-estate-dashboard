@@ -18,12 +18,13 @@ interface Props {
   center: { latitude: number; longitude: number };
   zoom: number;
   onBoundsChange?: (bounds: MapBounds, visibleIds: Set<string>) => void;
+  onPropertySelect?: (id: string) => void;
+  selectedPropertyId?: string | null;
 }
 
-export function PropertyMap({ properties, activeMetric, center, zoom, onBoundsChange }: Props) {
+export function PropertyMap({ properties, activeMetric, center, zoom, onBoundsChange, onPropertySelect, selectedPropertyId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const popupRef = useRef<maplibregl.Popup | null>(null);
   const [basemap, setBasemap] = useState<'light' | 'dark'>('light');
   const [mapReady, setMapReady] = useState(false);
 
@@ -177,29 +178,11 @@ export function PropertyMap({ properties, activeMetric, center, zoom, onBoundsCh
       setMapReady(true);
     });
 
-    // --- Click popup ---
+    // --- Click to select property (drives sidebar detail panel) ---
     map.on('click', 'property-points', (e) => {
       if (!e.features?.length) return;
-      const props = e.features[0].properties;
-      const coords = (e.features[0].geometry as GeoJSON.Point).coordinates as [number, number];
-
-      if (popupRef.current) popupRef.current.remove();
-
-      const html = `
-        <div style="font-size:12px;line-height:1.6;min-width:180px;">
-          <div style="font-weight:600;margin-bottom:4px;">${props.address}</div>
-          <div style="color:#64748b;margin-bottom:6px;">${props.city}</div>
-          <div><b>$${Number(props.listPrice).toLocaleString()}</b> · ${props.bedrooms}bd/${props.bathrooms}ba</div>
-          <div>${Number(props.sqft).toLocaleString()} sqft · $${props.pricePerSqft}/sqft</div>
-          <div>Built ${props.yearBuilt} · ${props.daysOnMarket} DOM</div>
-          <div>Walk score: ${props.walkScore}</div>
-        </div>
-      `;
-
-      popupRef.current = new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
-        .setLngLat(coords)
-        .setHTML(html)
-        .addTo(map);
+      const id = e.features[0].properties?.id as string | undefined;
+      if (id && onPropertySelect) onPropertySelect(id);
     });
 
     map.on('click', 'clusters', (e) => {
@@ -252,6 +235,19 @@ export function PropertyMap({ properties, activeMetric, center, zoom, onBoundsCh
     if (!source) return;
     source.setData(buildGeoJSON(properties));
   }, [properties, mapReady, buildGeoJSON]);
+
+  // Highlight selected property
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (!map.getLayer('property-points')) return;
+    map.setPaintProperty('property-points', 'circle-stroke-width', [
+      'case', ['==', ['get', 'id'], selectedPropertyId ?? ''], 3.5, 1.5,
+    ]);
+    map.setPaintProperty('property-points', 'circle-stroke-color', [
+      'case', ['==', ['get', 'id'], selectedPropertyId ?? ''], '#000000', '#ffffff',
+    ]);
+  }, [selectedPropertyId, mapReady]);
 
   // Swap basemap style
   useEffect(() => {

@@ -2,9 +2,11 @@
 
 import { useMemo } from 'react';
 import type { USProperty } from '@/lib/types/property';
+import type { PropertyScore } from '@/lib/types/analytics';
 import { getMetricByKey, getMetricStats } from '@/lib/config/metrics';
 import { LayerSelector } from './layer-selector';
 import { MetricDistribution } from './metric-distribution';
+import { PropertyDetail } from './property-detail';
 import { Building2, DollarSign, Clock, TrendingUp } from 'lucide-react';
 
 interface Props {
@@ -12,9 +14,12 @@ interface Props {
   visibleProperties: USProperty[];
   activeMetric: string;
   onMetricChange: (key: string) => void;
+  selectedProperty?: USProperty | null;
+  selectedScore?: PropertyScore | null;
+  onClearSelection?: () => void;
 }
 
-export function MapSidebar({ allProperties, visibleProperties, activeMetric, onMetricChange }: Props) {
+export function MapSidebar({ allProperties, visibleProperties, activeMetric, onMetricChange, selectedProperty, selectedScore, onClearSelection }: Props) {
   const metricConfig = getMetricByKey(activeMetric);
 
   const stats = useMemo(() => {
@@ -27,6 +32,17 @@ export function MapSidebar({ allProperties, visibleProperties, activeMetric, onM
       metricStats: getMetricStats(props as unknown as Record<string, unknown>[], activeMetric),
     };
   }, [visibleProperties, allProperties, activeMetric]);
+
+  // Show property detail panel when a property is selected
+  if (selectedProperty) {
+    return (
+      <PropertyDetail
+        property={selectedProperty}
+        score={selectedScore ?? undefined}
+        onClose={() => onClearSelection?.()}
+      />
+    );
+  }
 
   const kpis = [
     { icon: Building2, label: 'Properties', value: stats.count.toLocaleString() },
